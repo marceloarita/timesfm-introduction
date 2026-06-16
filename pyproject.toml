@@ -1,0 +1,17 @@
+[project]
+name = "timesfm-introduction"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "timesfm[pax]>=2.0.0",
+    "pandas>=2.0.0",
+    "numpy>=1.26.0",
+    "matplotlib>=3.8.0",
+    "statsmodels>=0.14.0",
+    "scikit-learn>=1.4.0",
+    "kaggle>=1.6.0",
+    "jupyter>=1.0.0",
+    "ipykernel>=6.29.0",
+]
