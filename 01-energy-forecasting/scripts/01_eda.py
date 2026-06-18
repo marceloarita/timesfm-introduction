@@ -1,17 +1,17 @@
-###########################################
-# Import libraries
-###########################################
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 
-sns.set_theme(style="whitegrid", palette="muted")
-BLUE = "#147EC5"
-GRAY = "#95A5A6"
+sns.set_theme(style="white", palette="muted")
+BLUE   = "#147EC5"
+ORANGE = "#F1993A"
+GRAY   = "#828A8AB3"
 
-DATA_PATH = Path(__file__).parents[1] / "data/raw/pjm_hourly_est.csv"
+DATA_PATH   = Path(__file__).parents[1] / "data/raw/pjm_hourly_est.csv"
+CHARTS_PATH = Path(__file__).parents[1] / "charts"
+CHARTS_PATH.mkdir(exist_ok=True)
 
 ###########################################
 # Load & basic info
@@ -45,10 +45,13 @@ print(f"Duplicate timestamps   : {duplicates}")
 ###########################################
 fig, ax = plt.subplots(figsize=(16, 4))
 ax.plot(series["Datetime"], series["mw"], color=BLUE, linewidth=0.4, alpha=0.8)
-ax.set(title="PJM East Load — Full Series (2002–2018)", ylabel="MW", xlabel="")
+ax.set_title("PJM East Load — Full Series (2002–2018)", fontsize=16)
+ax.set_ylabel("MW", fontsize=15)
+ax.tick_params(labelsize=14)
 ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x/1000:.0f}k"))
 sns.despine()
 plt.tight_layout()
+plt.savefig(CHARTS_PATH / "eda_full_series.png", dpi=150, bbox_inches="tight")
 plt.show()
 
 ###########################################
@@ -57,30 +60,40 @@ plt.show()
 window = series[(series["Datetime"] >= "2018-01-01") & (series["Datetime"] < "2018-01-29")]
 fig, ax = plt.subplots(figsize=(16, 4))
 ax.plot(window["Datetime"], window["mw"], color=BLUE, linewidth=1.2)
-ax.set(title="PJM East Load — 4-Week Window (Jan 2018)", ylabel="MW", xlabel="")
+ax.set_title("PJM East Load — 4-Week Window (Jan 2018)", fontsize=16)
+ax.set_ylabel("MW", fontsize=15)
+ax.tick_params(labelsize=14)
+ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter("%b %d"))
 ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x/1000:.0f}k"))
 sns.despine()
 plt.tight_layout()
+plt.savefig(CHARTS_PATH / "eda_4week_zoom.png", dpi=150, bbox_inches="tight")
 plt.show()
 
 ###########################################
 # Distribution
 ###########################################
-fig, ax = plt.subplots(figsize=(8, 4))
+fig, ax = plt.subplots(figsize=(8, 5))
 ax.hist(series["mw"], bins=80, color=BLUE, edgecolor="white", linewidth=0.3, alpha=0.85)
-ax.axvline(series["mw"].mean(), color=GRAY, linestyle="--", linewidth=1.2, label=f"Mean {series['mw'].mean()/1000:.1f}k MW")
-ax.set(title="PJM East Load Distribution", xlabel="MW", ylabel="Count")
+ax.axvline(series["mw"].mean(), color=GRAY, linestyle="--", linewidth=1.5,
+           label=f"Mean {series['mw'].mean()/1000:.1f}k MW")
+ax.set_title("PJM East Load Distribution", fontsize=16)
+ax.set_xlabel("MW", fontsize=15)
+ax.set_ylabel("Count", fontsize=15)
+ax.tick_params(labelsize=14)
 ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x/1000:.0f}k"))
-ax.legend()
+ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x/1000:.0f}k"))
+ax.legend(fontsize=12, framealpha=0.9)
 sns.despine()
 plt.tight_layout()
+plt.savefig(CHARTS_PATH / "eda_distribution.png", dpi=150, bbox_inches="tight")
 plt.show()
 
 ###########################################
 # Outlier detection via seasonal z-score (month × hour)
 ###########################################
 series["month"] = series["Datetime"].dt.month
-series["hour"] = series["Datetime"].dt.hour
+series["hour"]  = series["Datetime"].dt.hour
 grp = series.groupby(["month", "hour"])["mw"]
 series["zscore"] = grp.transform(lambda x: stats.zscore(x, ddof=1))
 outliers = series[series["zscore"].abs() > 3]
@@ -92,10 +105,14 @@ print(outliers[["Datetime", "mw", "zscore"]].head(10))
 ###########################################
 fig, ax = plt.subplots(figsize=(16, 4))
 ax.plot(series["Datetime"], series["mw"], color=BLUE, linewidth=0.4, alpha=0.7)
-ax.scatter(outliers["Datetime"], outliers["mw"], color="#F1993A", s=8, zorder=5, label=f"Outliers ({len(outliers)})")
-ax.set(title="PJM East Load — Outliers Highlighted", ylabel="MW", xlabel="")
+ax.scatter(outliers["Datetime"], outliers["mw"], color=ORANGE, s=8, zorder=5,
+           label=f"Outliers ({len(outliers)})")
+ax.set_title("PJM East Load — Outliers Highlighted", fontsize=16)
+ax.set_ylabel("MW", fontsize=15)
+ax.tick_params(labelsize=14)
 ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x/1000:.0f}k"))
-ax.legend()
+ax.legend(fontsize=12, framealpha=0.9)
 sns.despine()
 plt.tight_layout()
+plt.savefig(CHARTS_PATH / "eda_outliers.png", dpi=150, bbox_inches="tight")
 plt.show()
