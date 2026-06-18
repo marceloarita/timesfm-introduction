@@ -19,7 +19,8 @@ CHARTS_PATH.mkdir(exist_ok=True)
 BASE_EXP = "exp3_8736h"
 
 # Top features selected from SHAP analysis in 04_residual_model.py
-ENSEMBLE_FEATURES = ["temperature", "apparent_temperature", "humidity"]
+WEATHER_COLS      = ["temperature", "apparent_temperature", "humidity"]
+ENSEMBLE_FEATURES = ["temperature", "apparent_temperature", "humidity", "HDD", "CDD"]
 
 EXPERIMENTS = [
     ("exp1_512h",  512),
@@ -39,7 +40,9 @@ def attach_weather(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["datetime"] = df["date"] + pd.to_timedelta(df["hour"], unit="h")
     df["residual"]  = df["actual"] - df["predicted"]
-    df = df.join(weather[ENSEMBLE_FEATURES], on="datetime")
+    df = df.join(weather[WEATHER_COLS], on="datetime")
+    df["HDD"] = (18 - df["temperature"]).clip(lower=0)
+    df["CDD"] = (df["temperature"] - 18).clip(lower=0)
     return df.dropna(subset=ENSEMBLE_FEATURES + ["residual"])
 
 train_df = attach_weather(wf_2017)
