@@ -245,7 +245,7 @@ model_names = list(candidates.keys())
 r2_values   = [candidates[n]["r2"] for n in model_names]
 bar_colors  = [ORANGE if n == best_name else BLUE for n in model_names]
 
-fig, ax = plt.subplots(figsize=(10, 6))
+fig, ax = plt.subplots(figsize=(10, 5))
 bars = ax.bar(model_names, r2_values, color=bar_colors, width=0.45, edgecolor="white")
 ax.axhline(0, color="black", linewidth=0.9)
 
@@ -253,19 +253,19 @@ for bar, val in zip(bars, r2_values):
     x = bar.get_x() + bar.get_width() / 2
     if val >= 0:
         ax.text(x, val + 0.004, f"{val:.3f}", ha="center", va="bottom",
-                fontsize=12, fontweight="bold")
+                fontsize=11, fontweight="bold")
     else:
         ax.text(x, val - 0.004, f"{val:.3f}", ha="center", va="top",
-                fontsize=12, fontweight="bold")
+                fontsize=11, fontweight="bold")
 
 ymin = min(r2_values) - 0.05
 ymax = max(r2_values) + 0.03
 ax.set_ylim(ymin, ymax)
 ax.set_title("Residual Model Candidates -- R2 on 2024 Test Set\n(higher = better residual prediction)",
-             fontsize=13)
+             fontsize=14)
 ax.set_ylabel("R2  (variance of TimesFM errors explained)", fontsize=12)
 ax.tick_params(axis="x", labelsize=11, pad=8)
-ax.tick_params(axis="y", labelsize=10)
+ax.tick_params(axis="y", labelsize=11)
 sns.despine()
 plt.tight_layout()
 plt.savefig(CHARTS_PATH / "ensemble_residual_r2_comparison.png", dpi=150, bbox_inches="tight")
@@ -280,7 +280,7 @@ n_helped = int((
 ).sum())
 
 lim = max(np.abs(actual_resid).max(), np.abs(pred_resid).max()) * 1.1
-fig, ax = plt.subplots(figsize=(6, 6))
+fig, ax = plt.subplots(figsize=(10, 7))
 ax.scatter(actual_resid, pred_resid, color=PURPLE, alpha=0.6, edgecolors="white", s=55, zorder=3)
 ax.plot([-lim, lim], [-lim, lim], color=GRAY, linewidth=1.2, linestyle="--", label="Perfect correction")
 ax.axhline(0, color="black", linewidth=0.7)
@@ -293,9 +293,9 @@ ax.set_title(
     f"{best_name} -- Best Residual Model (2024 Test)\n"
     f"Pearson r = {best['pearson_r']:+.3f}  |  R2 = {best['r2']:.3f}"
     f"  |  Helped {n_helped}/{len(actual_resid)} weeks",
-    fontsize=12,
+    fontsize=14,
 )
-ax.legend(fontsize=10)
+ax.legend(fontsize=11)
 sns.despine()
 plt.tight_layout()
 plt.savefig(CHARTS_PATH / "ensemble_residual_scatter.png", dpi=150, bbox_inches="tight")
@@ -316,18 +316,18 @@ eval_table(
 )
 
 # ── 10. Chart — Forecast vs Actual ────────────────────────────────────────────
-fig, ax = plt.subplots(figsize=(16, 5))
+fig, ax = plt.subplots(figsize=(14, 4.5))
 ax.plot(base["date"], actual_2024,   color="black",  linewidth=2.0, label="Actual",         zorder=5)
 ax.plot(base["date"], naive_2024,    color=GRAY,     linewidth=1.1, linestyle="--", label="Naive lag-52")
 ax.plot(base["date"], timesfm_2024,  color=BLUE,     linewidth=1.4, label="TimesFM exp_156w")
 ax.plot(base["date"], ensemble_2024, color=PURPLE,   linewidth=1.6, linestyle="-.",
         label=f"TFM + {best_name} Residual")
 
-ax.set_title("U.S. Gasoline Demand -- Ensemble vs TimesFM (2024)", fontsize=16)
-ax.set_ylabel("Thousand Barrels/Day", fontsize=13)
+ax.set_title("U.S. Gasoline Demand -- Ensemble vs TimesFM (2024)", fontsize=14)
+ax.set_ylabel("Thousand Barrels/Day", fontsize=12)
 ax.tick_params(labelsize=11)
 ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x/1000:.1f}k"))
-ax.legend(fontsize=10, ncol=2, framealpha=0.9)
+ax.legend(fontsize=11, ncol=2, framealpha=0.9)
 sns.despine()
 plt.tight_layout()
 plt.savefig(CHARTS_PATH / "ensemble_forecast_2024.png", dpi=150, bbox_inches="tight")
@@ -344,15 +344,15 @@ bar_names  = [r[0] for r in bar_data]
 bar_colors = [r[2] for r in bar_data]
 bar_scaled = [mae(r[1], actual_2024) / naive_mae_val for r in bar_data]
 
-fig, ax = plt.subplots(figsize=(8, 5))
+fig, ax = plt.subplots(figsize=(10, 5))
 bars = ax.bar(bar_names, bar_scaled, color=bar_colors, width=0.5, edgecolor="white")
 ax.axhline(1.0, color=GRAY, linestyle="--", linewidth=1.2, label="Naive baseline (= 1.0)")
 for bar, val in zip(bars, bar_scaled):
     ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.008,
-            f"{val:.3f}", ha="center", va="bottom", fontsize=12, fontweight="bold")
+            f"{val:.3f}", ha="center", va="bottom", fontsize=11, fontweight="bold")
 ax.set_ylim(0, 1.15)
-ax.set_title("Scaled MAE -- Model Comparison (2024 test set)", fontsize=15)
-ax.set_ylabel("Scaled MAE  (lower = better)", fontsize=13)
+ax.set_title("Scaled MAE -- Model Comparison (2024 test set)", fontsize=14)
+ax.set_ylabel("Scaled MAE  (lower = better)", fontsize=12)
 ax.tick_params(labelsize=11)
 ax.legend(fontsize=11)
 sns.despine()

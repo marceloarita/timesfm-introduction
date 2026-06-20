@@ -148,7 +148,7 @@ for year, grp in all_years.groupby("year"):
     mid  = grp["date"].iloc[len(grp) // 2]
     year_stats[year] = {"smae": smae, "mid": mid}
 
-fig, ax = plt.subplots(figsize=(18, 5.5))
+fig, ax = plt.subplots(figsize=(16, 5))
 
 ax.plot(all_years["date"], all_years["actual"],  color=COLOR_ACTUAL, linewidth=1.6,
         label="Actual demand", zorder=4)
@@ -175,13 +175,13 @@ for year, stats in year_stats.items():
         stats["mid"], 0.96,
         f"{year}   Scaled MAE = {stats['smae']:.3f}",
         transform=trans, ha="center", va="top",
-        fontsize=9.5, color="#6B7280",
+        fontsize=11, color="#6B7280",
         bbox=dict(boxstyle="round,pad=0.35", facecolor="white",
                   edgecolor="#E2E8F0", alpha=0.92),
     )
 
 ax.set_title("U.S. Gasoline Demand — TimesFM Zero-Shot vs Naive (2023–2025)",
-             fontsize=15, pad=14)
+             fontsize=14, pad=14)
 ax.set_ylabel("Thousand Barrels/Day", fontsize=12)
 ax.tick_params(labelsize=11)
 ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x/1000:.1f}k"))

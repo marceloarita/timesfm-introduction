@@ -141,11 +141,11 @@ for _, row in summary_df.iterrows():
     ax.annotate(f"{row['scaled_mae']:.3f}",
                 xy=(row["ctx_len"], row["scaled_mae"]),
                 xytext=(0, 10), textcoords="offset points",
-                ha="center", fontsize=10, color=BLUE)
+                ha="center", fontsize=11, color=BLUE)
 ax.axhline(1.0, color=GRAY, linestyle="--", linewidth=1.2, label="Naive lag-52 (= 1.0)")
-ax.set_title("TimesFM — Scaled MAE vs Context Length (2024 test)", fontsize=15)
-ax.set_xlabel("Context Length (weeks)", fontsize=13)
-ax.set_ylabel("Scaled MAE", fontsize=13)
+ax.set_title("TimesFM — Scaled MAE vs Context Length (2024 test)", fontsize=14)
+ax.set_xlabel("Context Length (weeks)", fontsize=12)
+ax.set_ylabel("Scaled MAE", fontsize=12)
 ax.set_xticks(summary_df["ctx_len"])
 ax.tick_params(labelsize=11)
 ax.legend(fontsize=11)
