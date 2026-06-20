@@ -1,40 +1,32 @@
 """
 02_baseline_models.py
 ─────────────────────
-Baseline model comparison for U.S. gasoline demand (2024 test set).
+TimesFM baseline for U.S. gasoline demand (2024 test set).
 
-Models:
-  1. Naive lag-52         — same week last year
-  2. TimesFM exp_156w     — zero-shot, context sweep 52–416 weeks (elbow)
-  3. XGBoost A (direct)   — supervised, train 2013-2023, feature importance
+Runs a context-length sweep (52–416 weeks) to find the optimal context window.
+The selected context (156 weeks, elbow) becomes the TimesFM baseline.
+
+Price data is also downloaded here and cached for use in script 03.
 
 Outputs:
   charts/elbow_context_length.png
-  charts/baseline_feature_importance.png
   data/processed/walk_forward_results.csv   (TimesFM sweep — cached)
-  data/processed/baseline_results_2024.csv  (aligned predictions for script 03)
-  data/models/xgb_baseline.joblib
+  data/processed/baseline_results_2024.csv  (TimesFM predictions for script 03)
+  data/raw/gasoline_price_weekly.csv        (cached for script 03)
 """
 
-import sys
 from pathlib import Path
 import os
 import requests
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import seaborn as sns
-import xgboost as xgb
 from dotenv import load_dotenv
 
-sys.path.insert(0, str(Path(__file__).parent))
-from utils import save_model, eval_table, mae
-
 sns.set_theme(style="white", palette="muted")
-BLUE   = "#147EC5"
-ORANGE = "#F1993A"
-GRAY   = "#95A5A6"
+BLUE = "#147EC5"
+GRAY = "#95A5A6"
 
 BASE_DIR     = Path(__file__).parents[1]
 DATA_PATH    = BASE_DIR / "data/raw/gasoline_weekly.csv"
@@ -58,7 +50,7 @@ values = demand["kbpd"].to_numpy(dtype=float)
 dates  = demand["date"]
 print(f"Demand: {len(demand)} weeks  ({demand['date'].min().date()} → {demand['date'].max().date()})")
 
-# ── 2. Load / download price data ──────────────────────────────────────────────
+# ── 2. Download / cache price data (used by script 03) ─────────────────────────
 load_dotenv()
 API_KEY = os.environ.get("EIA_API_KEY", "")
 
@@ -90,50 +82,9 @@ if not PRICE_PATH.exists():
     price_df.to_csv(PRICE_PATH, index=False)
     print(f"  Saved → {PRICE_PATH} ({len(price_df)} weeks)")
 else:
-    price_df = pd.read_csv(PRICE_PATH, parse_dates=["date"])
-    print(f"Price data loaded from cache ({len(price_df)} weeks)")
+    print(f"Price data loaded from cache ({PRICE_PATH.name})")
 
-# ── 3. Merge demand + price (nearest date, ±7 days) ────────────────────────────
-df = pd.merge_asof(
-    demand.sort_values("date"),
-    price_df.sort_values("date").rename(columns={"date": "price_date"}),
-    left_on="date", right_on="price_date",
-    tolerance=pd.Timedelta("7 days"),
-    direction="nearest",
-).drop(columns="price_date").sort_values("date").reset_index(drop=True)
-
-print(f"Merged rows: {len(df)}  |  Price NAs: {df['price_usd'].isna().sum()}")
-
-# ── 4. Feature engineering ─────────────────────────────────────────────────────
-df["week_of_year"] = df["date"].dt.isocalendar().week.astype(int)
-df["month"]        = df["date"].dt.month
-df["quarter"]      = df["date"].dt.quarter
-df["year"]         = df["date"].dt.year
-df["is_summer"]    = df["week_of_year"].between(20, 35).astype(int)
-df["covid"]        = (df["year"] == 2020).astype(int)
-
-for lag in [1, 4, 52, 104]:
-    df[f"lag_{lag}"] = df["kbpd"].shift(lag)
-
-df["rolling_4w_mean"]  = df["kbpd"].shift(1).rolling(4).mean()
-df["rolling_13w_mean"] = df["kbpd"].shift(1).rolling(13).mean()
-df["rolling_4w_std"]   = df["kbpd"].shift(1).rolling(4).std()
-
-df["price_lag_1"]  = df["price_usd"].shift(1)
-df["price_lag_4"]  = df["price_usd"].shift(4)
-df["price_chg_4w"] = df["price_usd"] - df["price_usd"].shift(4)
-df["price_vs_52w"] = df["price_usd"] - df["price_usd"].shift(52)
-
-df = df.dropna().reset_index(drop=True)
-
-FEATURES = [
-    "week_of_year", "month", "quarter", "year", "is_summer", "covid",
-    "lag_1", "lag_4", "lag_52", "lag_104",
-    "rolling_4w_mean", "rolling_13w_mean", "rolling_4w_std",
-    "price_lag_1", "price_lag_4", "price_chg_4w", "price_vs_52w",
-]
-
-# ── 5. TimesFM context sweep (load cache or run) ───────────────────────────────
+# ── 3. TimesFM context sweep (load cache or run) ───────────────────────────────
 if WF_PATH.exists():
     wf_results = pd.read_csv(WF_PATH, parse_dates=["date"])
     print(f"\nTimesFM sweep loaded from cache ({len(wf_results)} records, "
@@ -171,7 +122,7 @@ else:
     wf_results.to_csv(WF_PATH, index=False)
     print(f"  Saved → {WF_PATH}")
 
-# ── 6. Elbow plot — Scaled MAE vs context length ───────────────────────────────
+# ── 4. Elbow plot — Scaled MAE vs context length ───────────────────────────────
 summary_rows = []
 for ctx_len, grp in wf_results.groupby("context_len"):
     m         = (grp["predicted"] - grp["actual"]).abs().mean()
@@ -203,74 +154,19 @@ plt.tight_layout()
 plt.savefig(CHARTS_PATH / "elbow_context_length.png", dpi=150, bbox_inches="tight")
 plt.show()
 
-# ── 7. XGBoost A — direct demand prediction ────────────────────────────────────
-print("\nTraining XGBoost A (direct demand prediction)...")
-train_a   = df[df["year"].between(2013, 2023)].copy()
-test_a    = df[df["year"] == TEST_YEAR].copy()
-weights_a = np.where(train_a["covid"] == 1, 0.3, 1.0)
-
-model_a = xgb.XGBRegressor(
-    n_estimators=400, max_depth=4, learning_rate=0.05,
-    subsample=0.8, colsample_bytree=0.8,
-    importance_type="gain",
-    random_state=42, verbosity=0,
-)
-model_a.fit(train_a[FEATURES], train_a["kbpd"], sample_weight=weights_a)
-pred_xgb_2024 = model_a.predict(test_a[FEATURES])
-print(f"  Train: {len(train_a)} weeks (2013–2023)  |  Test: {len(test_a)} weeks (2024)")
-
-save_model(model_a, "xgb_baseline")
-
-# ── 8. Feature importance chart ────────────────────────────────────────────────
-importance = (
-    pd.Series(model_a.feature_importances_, index=FEATURES)
-    .sort_values(ascending=True)
-)
-
-fig, ax = plt.subplots(figsize=(9, 6))
-colors = [ORANGE if importance[f] == importance.max() else BLUE for f in importance.index]
-ax.barh(importance.index, importance.values, color=colors, height=0.65)
-ax.set_title("XGBoost A — Feature Importance (Gain)", fontsize=14)
-ax.set_xlabel("Normalized Gain", fontsize=12)
-ax.tick_params(labelsize=11)
-sns.despine()
-plt.tight_layout()
-plt.savefig(CHARTS_PATH / "baseline_feature_importance.png", dpi=150, bbox_inches="tight")
-plt.show()
-
-print("\nTop 5 features by gain:")
-for feat, val in importance.sort_values(ascending=False).head(5).items():
-    print(f"  {feat:<25} {val:.4f}")
-
-# ── 9. Align predictions for evaluation ───────────────────────────────────────
-# Inner join TimesFM exp_156w + XGBoost on date
+# ── 5. Save TimesFM exp_156w predictions for script 03 ────────────────────────
 tfm_156 = (
     wf_results[wf_results["experiment"] == f"exp_{CONTEXT_LEN}w"]
-    [["date", "predicted", "naive"]]
+    [["date", "actual", "naive", "predicted"]]
     .rename(columns={"predicted": "timesfm"})
+    .reset_index(drop=True)
 )
 
-eval_df = (
-    test_a[["date", "kbpd", "lag_52"]]
-    .rename(columns={"kbpd": "actual", "lag_52": "naive"})
-    .assign(xgb_a=pred_xgb_2024)
-    .merge(tfm_156[["date", "timesfm"]], on="date", how="inner")
-)
+naive_mae = (tfm_156["naive"] - tfm_156["actual"]).abs().mean()
+tfm_mae   = (tfm_156["timesfm"] - tfm_156["actual"]).abs().mean()
+print(f"\nTimesFM exp_{CONTEXT_LEN}w (2024):")
+print(f"  MAE        = {tfm_mae:.1f} kbpd")
+print(f"  Scaled MAE = {tfm_mae / naive_mae:.3f}")
 
-actual  = eval_df["actual"].values
-naive   = eval_df["naive"].values
-timesfm = eval_df["timesfm"].values
-xgb_a   = eval_df["xgb_a"].values
-
-eval_table(
-    [
-        ("Naive lag-52",       naive,   actual, naive),
-        ("TimesFM exp_156w",   timesfm, actual, naive),
-        ("XGBoost A (direct)", xgb_a,   actual, naive),
-    ],
-    title="Baseline Model Evaluation (2024)",
-)
-
-# ── 10. Save for script 03 ─────────────────────────────────────────────────────
-eval_df.to_csv(RESULTS_PATH, index=False)
-print(f"\nSaved → {RESULTS_PATH}  ({len(eval_df)} weeks)")
+tfm_156.to_csv(RESULTS_PATH, index=False)
+print(f"\nSaved → {RESULTS_PATH}  ({len(tfm_156)} weeks)")
