@@ -28,10 +28,14 @@ TRAIN_END   = pd.Timestamp("2017-12-31")
 # Philadelphia — representative city for PJM East region
 LAT, LON = 39.95, -75.16
 
-FEATURES = [
+# All candidate features for SHAP discovery
+FEATURES_ALL = [
     "hour_of_day", "dayofweek", "month", "is_weekend", "is_holiday",
     "temperature", "apparent_temperature", "humidity", "HDD", "CDD",
 ]
+
+# Weather-only features selected after SHAP analysis
+FEATURES_SELECTED = ["temperature", "apparent_temperature", "humidity", "HDD", "CDD"]
 
 ###########################################
 # Load cleaned series (with DST fix)
@@ -127,7 +131,7 @@ else:
     print(f"Saved → {WEATHER_PATH}")
 
 ###########################################
-# Feature engineering
+# Feature engineering — all candidate features
 ###########################################
 us_holidays = hd.US(years=[2017, 2018])
 
@@ -147,7 +151,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     df["HDD"] = (18 - df["temperature"]).clip(lower=0)
     df["CDD"] = (df["temperature"] - 18).clip(lower=0)
 
-    return df.dropna(subset=FEATURES + ["residual"])
+    return df.dropna(subset=FEATURES_ALL + ["residual"])
 
 train_df = build_features(wf_2017)
 
@@ -155,20 +159,55 @@ wf_2018 = pd.read_csv(WF_2018_PATH, parse_dates=["date"])
 wf_2018 = wf_2018[wf_2018["experiment"] == BASE_EXP].copy()
 test_df  = build_features(wf_2018)
 
-# Train/val split within 2017: train Jan-Oct, val Nov-Dec
-val_mask   = train_df["datetime"] >= "2017-11-01"
-X_train    = train_df.loc[~val_mask, FEATURES]
-y_train    = train_df.loc[~val_mask, "residual"]
-X_val      = train_df.loc[val_mask, FEATURES]
-y_val      = train_df.loc[val_mask, "residual"]
-X_test     = test_df[FEATURES]
-y_test     = test_df["residual"]
+val_mask = train_df["datetime"] >= "2017-11-01"
+y_train  = train_df.loc[~val_mask, "residual"]
+y_val    = train_df.loc[val_mask,  "residual"]
 
-print(f"\nTrain: {len(X_train):,} rows | Val: {len(X_val):,} rows | Test: {len(X_test):,} rows")
+print(f"\nTrain: {(~val_mask).sum():,} rows | Val: {val_mask.sum():,} rows | Test: {len(test_df):,} rows")
 
 ###########################################
-# Train XGBoost
+# Phase 1 — Train with ALL features (SHAP discovery)
 ###########################################
+X_train_all = train_df.loc[~val_mask, FEATURES_ALL]
+X_val_all   = train_df.loc[val_mask,  FEATURES_ALL]
+
+xgb_full = xgb.XGBRegressor(
+    n_estimators=500,
+    max_depth=6,
+    learning_rate=0.05,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    early_stopping_rounds=50,
+    random_state=42,
+    n_jobs=-1,
+)
+xgb_full.fit(X_train_all, y_train, eval_set=[(X_val_all, y_val)], verbose=50)
+print(f"\nBest iteration (full model): {xgb_full.best_iteration}")
+
+###########################################
+# SHAP feature importance — all features
+###########################################
+explainer_full  = shap.TreeExplainer(xgb_full)
+shap_sample_all = X_train_all.sample(min(2000, len(X_train_all)), random_state=42)
+shap_values_all = explainer_full.shap_values(shap_sample_all)
+
+shap.summary_plot(shap_values_all, shap_sample_all, show=False, plot_size=(14, 5))
+plt.title("SHAP Feature Importance — XGBoost Residual Model (all features)", fontsize=14, pad=10)
+plt.tick_params(labelsize=12)
+sns.despine()
+plt.tight_layout()
+plt.savefig(CHARTS_PATH / "shap_feature_importance.png", dpi=150, bbox_inches="tight")
+plt.show()
+
+###########################################
+# Phase 2 — Retrain with SHAP-selected features (weather only)
+###########################################
+print("\n→ SHAP shows weather features dominate. Retraining with selected features...")
+
+X_train_sel = train_df.loc[~val_mask, FEATURES_SELECTED]
+X_val_sel   = train_df.loc[val_mask,  FEATURES_SELECTED]
+X_test_sel  = test_df[FEATURES_SELECTED]
+
 xgb_model = xgb.XGBRegressor(
     n_estimators=500,
     max_depth=6,
@@ -179,32 +218,13 @@ xgb_model = xgb.XGBRegressor(
     random_state=42,
     n_jobs=-1,
 )
-xgb_model.fit(
-    X_train, y_train,
-    eval_set=[(X_val, y_val)],
-    verbose=50,
-)
-print(f"\nBest iteration: {xgb_model.best_iteration}")
-
-###########################################
-# SHAP feature importance
-###########################################
-explainer   = shap.TreeExplainer(xgb_model)
-shap_sample = X_train.sample(min(2000, len(X_train)), random_state=42)
-shap_values = explainer.shap_values(shap_sample)
-
-shap.summary_plot(shap_values, shap_sample, show=False, plot_size=(14, 5))
-plt.title("SHAP Feature Importance — XGBoost Residual Model", fontsize=14, pad=10)
-plt.tick_params(labelsize=12)
-sns.despine()
-plt.tight_layout()
-plt.savefig(CHARTS_PATH / "shap_feature_importance.png", dpi=150, bbox_inches="tight")
-plt.show()
+xgb_model.fit(X_train_sel, y_train, eval_set=[(X_val_sel, y_val)], verbose=50)
+print(f"\nBest iteration (selected): {xgb_model.best_iteration}")
 
 ###########################################
 # Predict 2018 residuals & save
 ###########################################
-test_df["xgb_residual_pred"]       = xgb_model.predict(X_test)
+test_df["xgb_residual_pred"]   = xgb_model.predict(X_test_sel)
 test_df["predicted_corrected"] = test_df["predicted"] + test_df["xgb_residual_pred"]
 
 out_cols = ["date", "hour", "actual", "predicted", "xgb_residual_pred", "predicted_corrected", "naive"]
@@ -232,22 +252,25 @@ print(f"  Ensemble (XGBoost + TimesFM)     : MAE={mae_ensemble:,.0f} MW | MAPE={
 # Hypothesis: TimesFM overestimates high-temperature days because
 # 2017 summer context (used for training) had higher consumption than 2018
 ###########################################
-temp_idx  = FEATURES.index("temperature")
-shap_temp = shap_values[:, temp_idx]          # SHAP values for temperature (training sample)
-temp_vals = shap_sample["temperature"].values  # corresponding temperature values
+explainer_sel   = shap.TreeExplainer(xgb_model)
+shap_sample_sel = X_train_sel.sample(min(2000, len(X_train_sel)), random_state=42)
+shap_values_sel = explainer_sel.shap_values(shap_sample_sel)
+
+temp_idx  = FEATURES_SELECTED.index("temperature")
+shap_temp = shap_values_sel[:, temp_idx]
+temp_vals = shap_sample_sel["temperature"].values
 
 # 2017 vs 2018 summer hourly mean (Jun–Jul overlap)
-summer_2017 = series["2017-06-01":"2017-07-31"].copy()
+summer_2017      = series["2017-06-01":"2017-07-31"].copy()
 summer_2017_mean = summer_2017.groupby(summer_2017.index.hour)["mw"].mean()
 
-summer_2018 = series["2018-06-01":"2018-07-31"].copy()
+summer_2018      = series["2018-06-01":"2018-07-31"].copy()
 summer_2018_mean = summer_2018.groupby(summer_2018.index.hour)["mw"].mean()
 
 fig, axes = plt.subplots(1, 3, figsize=(20, 7))
 fig.suptitle("Temperature & Overestimation Analysis", fontsize=18, y=1.02)
 
 # Panel 1 — Residual vs Temperature (Jun–Jul 2018 only)
-# Negative residual = model overestimated
 ax = axes[0]
 summer_test = test_df[test_df["month"].isin([6, 7])]
 ax.scatter(summer_test["temperature"], summer_test["residual"],
@@ -259,7 +282,7 @@ ax.set_title("Residual vs Temperature\n(Jun–Jul 2018)", fontsize=16)
 ax.tick_params(labelsize=14)
 sns.despine(ax=ax)
 
-# Panel 2 — SHAP dependence plot for temperature (training data)
+# Panel 2 — SHAP dependence plot for temperature (selected model, training data)
 ax = axes[1]
 sc = ax.scatter(temp_vals, shap_temp, c=temp_vals, cmap="coolwarm", alpha=0.4, s=10, rasterized=True)
 ax.axhline(0, color="black", linewidth=1, linestyle="--")
@@ -329,3 +352,75 @@ plt.show()
 print(f"\nHot days (temp > 25°C) — residual summary:")
 print(f"  TimesFM  mean residual : {hot['residual'].mean():+,.0f} MW")
 print(f"  Ensemble mean residual : {hot['residual_ensemble'].mean():+,.0f} MW")
+
+###########################################
+# XGBoost residual model quality (2018 test)
+# Does XGBoost (weather-only) actually predict the residual well?
+###########################################
+ss_res   = ((test_df["residual"] - test_df["xgb_residual_pred"]) ** 2).sum()
+ss_tot   = ((test_df["residual"] - test_df["residual"].mean()) ** 2).sum()
+r2_xgb   = 1 - ss_res / ss_tot
+r_corr   = test_df["residual"].corr(test_df["xgb_residual_pred"])
+rmse_xgb = (ss_res / len(test_df)) ** 0.5
+mae_xgb  = (test_df["residual"] - test_df["xgb_residual_pred"]).abs().mean()
+
+print("\n=== XGBoost residual model quality (2018) ===")
+print(f"  Pearson r              : {r_corr:.3f}")
+print(f"  R²                     : {r2_xgb:.3f}")
+print(f"  RMSE (residual error)  : {rmse_xgb:,.0f} MW")
+print(f"  MAE  (residual error)  : {mae_xgb:,.0f} MW")
+
+fig, axes = plt.subplots(1, 3, figsize=(20, 6))
+fig.suptitle("XGBoost Residual Model Quality — 2018 Test Set", fontsize=18, y=1.02)
+
+# Panel 1 — Scatter: XGBoost predicted residual vs actual residual
+ax = axes[0]
+lim = max(test_df["residual"].abs().max(), test_df["xgb_residual_pred"].abs().max()) * 1.05
+ax.scatter(test_df["xgb_residual_pred"], test_df["residual"],
+           alpha=0.15, s=8, color="#2980B9", rasterized=True)
+ax.plot([-lim, lim], [-lim, lim], color="black", linewidth=1, linestyle="--", label="Identity line")
+ax.set_xlim(-lim, lim)
+ax.set_ylim(-lim, lim)
+ax.set_xlabel("XGBoost predicted residual (MW)", fontsize=13)
+ax.set_ylabel("Actual residual — actual minus TimesFM (MW)", fontsize=13)
+ax.set_title(f"Predicted vs Actual Residual\nR² = {r2_xgb:.3f}  |  r = {r_corr:.3f}", fontsize=15)
+ax.tick_params(labelsize=12)
+ax.legend(fontsize=11)
+sns.despine(ax=ax)
+
+# Panel 2 — Time series overlay (Jan–Mar 2018)
+ax = axes[1]
+sample = (
+    test_df[test_df["date"] <= pd.Timestamp("2018-03-31")]
+    .set_index("datetime")
+    .sort_index()
+)
+ax.plot(sample.index, sample["residual"],
+        color="#E74C3C", linewidth=1, alpha=0.85, label="Actual residual")
+ax.plot(sample.index, sample["xgb_residual_pred"],
+        color="#27AE60", linewidth=1, alpha=0.85, label="XGBoost prediction")
+ax.axhline(0, color="black", linewidth=0.8, linestyle="--")
+ax.set_xlabel("Date", fontsize=13)
+ax.set_ylabel("Residual (MW)", fontsize=13)
+ax.set_title("Residual: Actual vs XGBoost Predicted\n(Jan–Mar 2018)", fontsize=15)
+ax.tick_params(labelsize=11)
+ax.legend(fontsize=11)
+sns.despine(ax=ax)
+
+# Panel 3 — Distribution of residual prediction error
+ax = axes[2]
+res_error = test_df["residual"] - test_df["xgb_residual_pred"]
+sns.histplot(res_error, bins=60, color="#8E44AD", kde=True, ax=ax)
+ax.axvline(0, color="black", linewidth=1, linestyle="--")
+ax.axvline(res_error.mean(), color="#E74C3C", linewidth=1.5, linestyle=":",
+           label=f"Mean: {res_error.mean():+,.0f} MW")
+ax.set_xlabel("Residual prediction error — actual minus XGBoost (MW)", fontsize=12)
+ax.set_ylabel("Count", fontsize=13)
+ax.set_title("Distribution of Residual Prediction Error", fontsize=15)
+ax.tick_params(labelsize=12)
+ax.legend(fontsize=11)
+sns.despine(ax=ax)
+
+plt.tight_layout()
+plt.savefig(CHARTS_PATH / "xgb_residual_quality.png", dpi=150, bbox_inches="tight")
+plt.show()
