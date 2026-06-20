@@ -49,9 +49,31 @@ The three most important features by SHAP are all weather-derived: `humidity`, `
 
 ---
 
-## Ensemble and Limits
+## Can XGBoost Correct What TimesFM Gets Wrong?
 
-Combining TimesFM with an XGBoost correction trained on the top 5 SHAP features (temperature, apparent_temperature, humidity, HDD, CDD) reduces the Scaled MAE from 0.580 to 0.562. The mean hot-day residual drops from +1,331 MW to +1,235 MW — a real but modest improvement.
+Before building the ensemble, it is worth asking a more fundamental question: can XGBoost actually predict the TimesFM residual? If the answer is no, the ensemble is adding noise rather than signal.
+
+A direct diagnostic — regressing XGBoost's predicted residual against the actual residual on the 2018 test set — gives a clear answer:
+
+| Metric | Value |
+|---|---|
+| R² | 0.034 |
+| Pearson r | 0.386 |
+| MAE (residual error) | ~1,437 MW |
+
+**R² = 0.034.** The weather features explain only 3.4% of the variance in TimesFM's forecast errors. The scatter below makes this visible: XGBoost predictions cluster tightly near zero while actual residuals span ±10,000 MW. The model has almost no pointwise predictive power.
+
+<img src="charts/xgb_residual_quality.png" width="100%">
+
+This behavior is mathematically expected. When features carry little signal, the optimal constant predictor is the mean of the target — which for zero-centered residuals is approximately zero. The early stopping at iteration 27 (of 500) confirms the model found no further useful signal.
+
+The time series of residuals reveals why: there is visible cyclical structure in TimesFM's errors, but the **magnitude** of each spike is unpredictable from calendar or weather features alone. XGBoost can detect *when* errors tend to be larger (hot summer days) but cannot estimate *how large* they will be.
+
+---
+
+## Ensemble Results
+
+Despite low residual predictability, combining TimesFM with the XGBoost correction still yields a small but real improvement. The gain comes from correcting a **systematic climatic bias** — not from pointwise residual prediction.
 
 | Model | MAE | MAPE | Scaled MAE |
 |---|---|---|---|
@@ -59,7 +81,7 @@ Combining TimesFM with an XGBoost correction trained on the top 5 SHAP features 
 | exp3_8736h | 1,466 MW | 4.44% | 0.580 |
 | ensemble (exp3 + XGBoost) | 1,420 MW | 4.30% | **0.562** |
 
-The bottleneck is not the foundation model — it is the volume of data available to train the correction in the extreme regimes where it matters most.
+The mean hot-day residual (temp > 25°C) drops from +1,331 MW to +1,235 MW. XGBoost is acting as a **bias corrector by climate regime**, not as a residual model. The 3% MAE reduction reflects this limited but genuine role.
 
 <img src="charts/ensemble_full_period.png" width="100%">
 
